@@ -4,8 +4,10 @@ import openpyxl
 from typing import Optional,Any,Generator,Callable,Iterator,Iterable,NamedTuple
 from pathlib import Path
 from openpyxl.worksheet.worksheet import Worksheet
+from openpyxl import Workbook
 from collections import namedtuple
 from dataclasses import dataclass,field
+from types import MethodType
 
 _REPCHAR = ['/','-',' ','\\','&',]
 _REPCHAR_RE = re.compile(r'|'.join([fr"{c}+" for c in _REPCHAR]))
@@ -138,7 +140,7 @@ class ImplicitNamedRange:
         return ret
 
 def _set_sheet_inrs(sheet:Worksheet)->None:
-    last_merge_row = max(sheet._merged_cells.keys())
+    last_merge_row = max(sheet._merged_cells.keys(),default=0)
     for row,col_sets in list(sheet._merged_cells.items()):
         for start,end in col_sets:
             title = sheet.cell(row=row+1,column=start+1).value
@@ -157,16 +159,38 @@ def _set_sheet_inrs(sheet:Worksheet)->None:
                         break
                     else:
                         sr._nested.append((sheet.cell(row=row+2,column=next_start+1).value,row+1))
+            suffix=1
+            while (title,row) in sheet._nr:
+                title = title + f'-{suffix}'
+                suffix+=1
+                if suffix>100:
+                    raise ValueError((title,row))
             sheet._nr[(title,row)] = sr
 
-def implicit_named_ranges(sheet:Worksheet)->Generator[ImplicitNamedRange,None,None]:
+def implicit_named_ranges(sheet:Worksheet)->dict[tuple[str,int],ImplicitNamedRange]:
     if not sheet._nr:
         _set_sheet_inrs(sheet)
-    for v in sheet._nr.values():
-        yield v
+    return sheet._nr
 
 
-    
+ 
+def clear_values(self):
+    for row in self:
+        for cell in row:
+            cell.value = None
+
+def write_row(self,row:list,offset:tuple[int,int]=(1,1))->None:
+    for column_count,value in enumerate(row):
+        self.cell(row=offset[0],column=offset[1]+column_count).value = value
+
+def write_rows(self,rows:list[list]|list[dict],offset:tuple[int,int]=(1,1))->None:    
+    if rows and isinstance(rows[0],dict):
+        row_values = [list(rows[0].keys())]
+        for row in rows:
+            row_values.append(list(row.values()))
+    for row_count,val in enumerate(row_values):
+        self.write_row(val,(row_count+offset[0],offset[1]))
+
 def open(pth:Path|str)->list[Course]:
     def _blanks(v:str|float|int):
         if v == "":
@@ -178,6 +202,9 @@ def open(pth:Path|str)->list[Course]:
         for sc,sheet in enumerate(wb):
             sheet._merged_cells = {}
             sheet._nr = {}
+            sheet.write_row = MethodType(write_row,sheet)
+            sheet.write_rows = MethodType(write_rows,sheet)
+            sheet.clear_values = MethodType(clear_values,sheet)
             if not sc:
                 type(sheet).implicit_named_ranges = implicit_named_ranges
             
@@ -195,8 +222,7 @@ def open(pth:Path|str)->list[Course]:
                     if len(key)>1:
                         row_keys.append(tuple([key[0],key[-1]]))
                     sheet._merged_cells[rc] = list(row_keys)
-                else:
-                    
+                else:                
                     break
        
 

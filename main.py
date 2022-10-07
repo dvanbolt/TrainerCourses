@@ -1,5 +1,5 @@
 import argparse
-from TrainerCourses.course import CourseCollection
+from trainercourses.course import CourseCollection
 from pathlib import Path
 import os
 

@@ -12,6 +12,8 @@
 *.sln
 *.blob
 
+dev/
+dev.py
 dist/
 env/
 build/

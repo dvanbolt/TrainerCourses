@@ -1,5 +1,5 @@
 from __future__ import annotations
-from .openpyxl_extension import open as open_xlsx
+from .openpyxl_extension import open as open_xlsx,Workbook
 from typing import Optional,Any,Generator,Callable,Iterator,Iterable
 from enum import Enum
 from copy import deepcopy,copy
@@ -7,11 +7,11 @@ from math import sqrt
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass,asdict
-from pydantic import BaseModel,validator
+from pydantic import BaseModel,validator,Extra
 from .srch import qkfltr
 
 
-FIT_VERSION = 2
+ERG_VERSION = 2
 
 #stats.mean is slow af for this use case
 def mean(a:list[float])->float:
@@ -39,8 +39,10 @@ def pathsafe(fp:str|Path|Callable)->Callable|Path|str:
     else:
         return _clean_path(fp)
 
+
 class Templated:
     _key_word_argument = None
+    class_init_kwargs = {'extra':Extra.forbid}
 
     @classmethod
     def remap(cls,**kwargs):
@@ -53,25 +55,28 @@ class Templated:
     def parse(cls,**kwargs):            
         return cls(**cls.remap(**kwargs))
 
-
 class Category(str,Enum):
     anaerobic = "Anaerobic"
     warmup = "Warmup"
     cooldown = "Cooldown"
     steadystead = "Steady State"
     sweetspot = "Sweet Spot"
+    aerobic = "Aerobic Base"
 
 class CourseCollection:
-    class UserProfile(BaseModel,Templated):
+    class UserProfile(BaseModel,Templated,**Templated.class_init_kwargs):
         _key = {"Functional Threshold Power":"ftp"}
         ftp:float
 
-
-    def __init__(self,name:str,user:UserProfile)->None:
+    def __init__(self,name:str,user:UserProfile,workbook:Workbook,workbook_path:Path)->None:
         self._courses = {}
         self.user = user
         self.name = name
+        self.workbook = workbook
+        self.workbook_path = workbook_path
         self._path = None
+
+
 
     @property
     def ftp(self)->float:
@@ -89,23 +94,56 @@ class CourseCollection:
     @property
     def courses(self)->Generator[Course,None,None]:
         return self._courses.values()
+    @property
+    def course_names(self)->list[str]:
+        return list(self._courses.keys())
 
     def filter(self,include:Optional[list[str]|str]=None,exclude:Optional[list[str]|str]=None)->Generator[Course,None,None]:
         filtered_names = qkfltr(list(self._courses.keys()),include=include,exclude=exclude)
         for name in filtered_names:
             yield self._courses[name]
 
+    def build_library(self)->None:
+        courses = {d['name']:{k.title():v for (k,v) in d.items()} | {'Sport':'Bike Indoor'} \
+            for d in [course.dict() for course in self]}
+        
+        if courses:
+            existing = {}
+            sheet = self.workbook.get_sheet_by_name('Library')
+            rows = list(sheet.iter_rows())
+            col_key = {cell.value:col+1 for (col,cell) in enumerate(rows.pop(0))}
+            name_index = col_key['Name']
+            max_row = 1
+            for rc,row in enumerate(rows):
+                if row[name_index-1].value:
+                    existing[row[name_index-1].value] = rc+2
+                    max_row+=1
+                else:
+                    break
+            for course_name,course in courses.items():
+                
+                course_row = existing.get(course_name)
+                if not course_row:
+                    max_row+=1
+                    course_row = max_row
+                    print(course_row)
+                for key,value in course.items():
+                    sheet.cell(row=course_row,column=col_key[key]).value = value
+                    #print(f"Would set {(course_row,col_key[key])} to {value} for {course_name}")
+            self.workbook.save(filename=self.workbook_path)
+
     @classmethod
     def open_excel(cls,fp:Path|str)->CourseCollection:
+        reserved_sheets = ('config','schedule','library')
         output = {}
         fp = Path(fp)
         init_key = {"User Profile":("user",cls.UserProfile)}
         if fp.exists():
             name = fp.stem
             wb = open_xlsx(fp)
-            config_sheet = wb['config']
+            config_sheet = wb['Config']
             kwargs = {"name":name}
-            for named_range in config_sheet.implicit_named_ranges():
+            for named_range in config_sheet.implicit_named_ranges().values():
                 if named_range.name in init_key:
                     if isinstance(init_key[named_range.name],tuple):
                         kwarg,kwarg_type = init_key[named_range.name]
@@ -114,23 +152,16 @@ class CourseCollection:
                         kwarg = init_key[named_range.name]
                     kwargs[kwarg] = value 
 
-            inst = cls(**kwargs)
+            inst = cls(workbook=wb,workbook_path=fp,**kwargs)
 
             
             for name in wb.sheetnames:
                 sheet = wb[name]
-                if sheet.title != 'config':
+                if sheet.title.lower() not in reserved_sheets:
                     for course in Course.excel(inst,sheet):
                         inst._courses[course.version_name] = course
             for course in inst.courses:
-                #kes = []
-                #try:
                 course.link()
-                #except KeyError as ke:
-                 #   kes.append(str(ke))
-                #if kes:
-                  #  raise Exception(f"Filter Error: Can't exclude courses referenced in included courses. {','.join(kes)}")
-
             return inst
         else:
             raise Exception(f"File does not exist : {fp}")
@@ -190,7 +221,7 @@ class Course:
 
 
 
-    class Header(BaseModel,Templated):
+    class Header(BaseModel,Templated,**Templated.class_init_kwargs):
         _key = {"Name":"name","Category":"category","Repeat":"versions","Comments":"comments"}
         _template_name = "Header"
         _key_word_argument = "header"
@@ -200,17 +231,19 @@ class Course:
         comments:str|None = None
         versions:str|None = None
 
-    class PrependedCourse(BaseModel,Templated):
+    class PrependedCourse(BaseModel,Templated,**Templated.class_init_kwargs):
         _key = {"Name":"name","Blend Seconds":"blend"}
         _key_word_argument = "prepend"
         _template_name = "Insert Before"
         _singleton = False
         name:str
         blend:int|None = None
-    class AppendedCourse(PrependedCourse):
+    class AppendedCourse(PrependedCourse,**Templated.class_init_kwargs):
         _key_word_argument = "append"
         _template_name = "Insert After"
-    class CourseSegment(BaseModel,Templated):
+
+    
+    class CourseSegment(BaseModel,Templated,**Templated.class_init_kwargs):
         _key = {"Time":"time",
                 "Power":"power_start",
                 "Ramp-to Power":"ramp_to",
@@ -224,6 +257,8 @@ class Course:
         exclude:bool|None = None
         total_time:float = 0.0
 
+        
+
         @property
         def power_end(self)->int:
             if self.ramp_to:
@@ -231,7 +266,7 @@ class Course:
             return self.power_start
 
         @staticmethod
-        def _fit_fmt(i:float|int)->int|float:
+        def _erg_fmt(i:float|int)->int|float:
             if i % 1 == 0:
                 return int(i)
             else:
@@ -245,9 +280,9 @@ class Course:
 
 
         @property
-        def fit(self)->str:
-            return f"{self._fit_fmt(self.total_time)}\t{int(self.power_start)}\n"+\
-                f"{self._fit_fmt(self.total_time+self.time)}\t{int(self.power_end)}"
+        def erg(self)->str:
+            return f"{self._erg_fmt(self.total_time)}\t{int(self.power_start)}\n"+\
+                f"{self._erg_fmt(self.total_time+self.time)}\t{int(self.power_end)}"
         
         def __str__(self)->str:
             parts = [self._time_str(),"@",str(int(self.power_start)),'W']
@@ -272,15 +307,18 @@ class Course:
     def __init__(self,
                  collection:CourseCollection,
                  header:Header,
+                 name:str,
                  version:int,
+                 versioned:bool,
                  course_data:list[CourseSegment]|None = None,
                  prepend:list[PrependedCourse]|None=None,
                  append:list[AppendedCourse]|None=None)->None:
         self.collection = collection
-        self.name = header.name
+        self.name = name
         self.category = header.category
         self.comments = header.comments
         self.version = version
+        self.versioned = versioned
         self.prepend:list[Course] = []
         self.append:list[Course] = []
         self.segments:list[CourseSegment] = []
@@ -308,16 +346,22 @@ class Course:
             seg.total_time = self.segments[-1].total_time + seg.time
         self.segments.append(seg)
 
-    
+    def dict(self)->dict:
+        stats = asdict(self.stats)
+        p_ave = {f"{k}W avg":v for (k,v) in stats.pop('power_averages').items()}
+        return {'name':self.version_name,
+                'category':self.category.value} | stats | p_ave |\
+                    {'comments':self.comments}
 
-    def summary(self,stats:bool=False)->str:
+    def summary(self,stats:bool=True,segments:bool=True)->str:
         parts = []
         if stats:
             parts.append(f"{self.category.value} : {self.version_name}, {self.stats}, Comments : {self.comments}")
         else:
             parts.append(f"{self.category.value} : {self.version_name}-{round(self.total_time())}', Comments : {self.comments}")
-        for segment in self:
-            parts.append(f'\t{segment}')
+        if segments:
+            for segment in self:
+                parts.append(f'\t{segment}')
         return '\n'.join(parts)
 
     def link(self):
@@ -332,7 +376,11 @@ class Course:
 
 
     def add_linked_course(self,linked_course:str,pre:bool=False)->None:
-        lc = self.collection[linked_course.name]
+        try:
+            lc = self.collection[linked_course.name]
+        except KeyError as ke:
+            raise Exception(f"Could not find course '{linked_course.name}' to link to course '{self.name}' in "+\
+                f"{','.join(list(self.collection.course_names))}.")
         if not lc.linked:
             lc.link()
         if pre:
@@ -341,8 +389,12 @@ class Course:
             segs = [self.segments,deepcopy(lc.segments)]
 
         if linked_course.blend:
-            segs[0].append(self.CourseSegment(time=round(linked_course.blend/60.00,2),power_start=segs[0][-1].power_end,power_end=segs[1][-1].power_start))
-
+            p1=segs[0][-1].power_end
+            p2=segs[1][0].power_start
+            if p2!=p1:
+                segs[0].append(self.CourseSegment(time=round(linked_course.blend/60.00,2),
+                                                  power_start=p1,
+                                                  ramp_to=p2))
         self.segments = segs[0] + segs[1]
 
     @property
@@ -350,8 +402,8 @@ class Course:
         return f"{self.name}.erg"
 
     @property
-    def version_name(self)->str:
-        if self.version == 1:
+    def version_name(self)->str:       
+        if self.version == 1 and not self.versioned:
             return self.name
         else:
             return self.name+'-'+str(self.version)+'x'
@@ -361,13 +413,13 @@ class Course:
         return f"{self.category.value} {' '.join([k+'='+str(v) for (k,v) in self.stats.__dict__.items()])}"
 
     @property
-    def fit(self)->str:
-        parts = [f"[COURSE HEADER]","VERSION = {FIT_VERSION}",
+    def erg(self)->str:
+        parts = [f"[COURSE HEADER]","VERSION = {ERG_VERSION}",
                  "UNITS = ENGLISH",f"DESCRIPTION = {self.description}",
                  f"FILE NAME = {self.file_name}",
                  "FTP = 360",
                  "MINUTES WATTS",
-                 "[END COURSE HEADER]","[COURSE DATA]",'\n'.join([seg.fit for seg in self]),
+                 "[END COURSE HEADER]","[COURSE DATA]",'\n'.join([seg.erg for seg in self]),
                  "[END COURSE DATA]"]
         return '\n'.join(parts)
 
@@ -378,7 +430,7 @@ class Course:
 
     def power_by_second(self)->list[int]:
         power_by_seconds = []
-        for count,seg in enumerate(self.segments[:-1]):
+        for count,seg in enumerate(self.segments):
             second_range = int(round(60*seg.time,0))
             diff = seg.power_end-seg.power_start
             for second in range(second_range):
@@ -447,7 +499,7 @@ class Course:
 
     @property
     def path(self)->Path:
-        return (Path(pathsafe(self.category)) / pathsafe(self.version_name)).with_suffix('.fit')
+        return (Path(pathsafe(self.category)) / pathsafe(self.version_name)).with_suffix('.erg')
 
     def save(self,col_pth:Optional[Path]=None):
         if not col_pth:
@@ -457,41 +509,84 @@ class Course:
         if not pth.parent.exists():
             pth.parent.mkdir(parents=True)
         with open(pth,'w') as f:
-            f.write(self.fit)
+            print('Saving',pth)
+            f.write(self.erg)
 
     @classmethod
     def excel(cls,collection,sheet)->list[Course]:
+        ret = []       
+        ranges = sheet.implicit_named_ranges()
+        missing:list[str] = []
+        collection_kwargs:dict[str,ls.Header|cls.PrependedCourse|cls.AppendedCourse] = {}
+        course_data:dict[str,list[cls.CourseSegment]] = {}
 
-        def _blanks(v:str|float|int):
-            if v == "":
-                return None
-            return v
-        ret = []
-        
-        section_kwargs = {}
-        for named_range in sheet.implicit_named_ranges():
-            if named_range.name in cls._sections:
-                section_type = cls._sections[named_range.name]
-                section_data = named_range.list(element=dict,element_keys=list(section_type._key.keys()))
-                
-                if section_type._singleton:
-                    section_kwargs[section_type._key_word_argument] = section_type.parse(**section_data[0])
-
+        for req_section in (cls.Header,cls.PrependedCourse,cls.AppendedCourse,):
+            try:
+                for row in range(100):
+                    req_section_range = ranges.pop((req_section._template_name,row),None)
+                    if req_section_range:
+                        break
                 else:
-                    section_kwargs[section_type._key_word_argument] = [section_type.parse(**line) for line in section_data]
+                    raise KeyError(req_section._template_name)
+            except KeyError as ke:
+                missing.append(req_section._template_name)
+            else:
+                keys = list(req_section._key.keys())
+                section_data = req_section_range.list(element=dict,
+                                                          element_keys=keys)
+                if req_section._singleton:
+                    collection_kwargs[req_section._key_word_argument] = req_section.parse(**section_data[0])
+                else:
+                    collection_kwargs[req_section._key_word_argument] = [req_section.parse(**line) for line in section_data]
+        if missing:
+            raise Exception(f"Couldn't find data for {', '.join(missing)} in top row on sheet '{sheet.title}'.")
 
-        for version in cls._parse_versions(section_kwargs['header'].versions):
-            ret.append(cls(collection,version=version,**section_kwargs))
+        header = collection_kwargs['header']
+
+        course_ranges = list(ranges.values())
+        for course_range in course_ranges:
+            if course_range.name.startswith('Course'):
+                suffix = ''.join([c for c in course_range.name.split('Course') if c][1:])
+                if not suffix and len(course_ranges)>1:
+                    suffix = ' V1'
+                
+                name = header.name + suffix
+                r = 1
+                while name in course_data:
+                    if len(name_array := name.split(' '))>1:                    
+                        name = f"{' '.join(name_array[:-1])} V{r}"
+                    else:
+                        name = f"{' '.join(name_array)} V{r}"
+                    r+=1
+
+                course_data[name] = [cls.CourseSegment.parse(**line) for line in \
+                    course_range.list(element=dict,
+                                      element_keys=list(cls.CourseSegment._key.keys()))]
+
+        for course_name,course_segments in course_data.items():
+            versions = cls._parse_versions(header.versions)
+            for version in versions:         
+                ret.append(cls(collection,
+                               name=course_name,
+                               version=version,
+                               course_data=course_segments,
+                               versioned=len(versions)>1,
+                               **collection_kwargs))
 
         return ret
 
     @classmethod
     def _parse_versions(cls,ver:str|float|None)->list[str]:
         if isinstance(ver,str):
-            try:
+            if ver.isnumeric():
                 return [int(float(ver)),]
-            except:
+            elif len(from_to := ver.split('-'))==2:
+                start,stop = [int(float(i.strip())) for i in from_to]
+                return list(range(start,stop+1))
+            elif ver.find(','):
                 return [int(i) for i in ver.split(',')]
+            else:
+                raise ValueError(ver)
         elif isinstance(ver,float):
             return [int(ver)]
         elif ver is None:

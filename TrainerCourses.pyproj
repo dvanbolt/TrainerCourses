@@ -4,8 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>008a52f6-d0d2-4b74-b3dd-fa5a2ab878a1</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>
-    </StartupFile>
+    <StartupFile>dev.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -23,6 +22,9 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="dev.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="trainercourses\course.py" />
     <Compile Include="main.py" />
     <Compile Include="trainercourses\openpyxl_extension.py" />
