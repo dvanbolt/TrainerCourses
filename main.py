@@ -18,9 +18,11 @@ if __name__ == "__main__":
     parser.add_argument('-p','--print',action="store_true",
                         help="Print all courses to console.")
 
+    parser.add_argument('-bl','--build',action="store_true",
+                        help="Build library sheet in excel file.")
     parser.add_argument('-e','--export',action="store_true",
                         help="Export to folder structure in parent directory or in 'src' directory if supplied")
-    parser.add_argument('-f','--format',default='fit',
+    parser.add_argument('-f','--format',default='erg',
                         help="Export to what format?")
 
     args = parser.parse_args()
@@ -29,6 +31,8 @@ if __name__ == "__main__":
 
     if args.print:
         print(cc.summary(stats=True))
+    if args.build:
+        cc.build_library()
     if args.export:
         if not args.destination:
             dst = Path(os.getcwd())

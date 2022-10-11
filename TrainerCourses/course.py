@@ -11,7 +11,7 @@ from pydantic import BaseModel,validator,Extra
 from .srch import qkfltr
 
 
-ERG_VERSION = 2
+FIT_VERSION = 2
 
 #stats.mean is slow af for this use case
 def mean(a:list[float])->float:
@@ -103,7 +103,7 @@ class CourseCollection:
         for name in filtered_names:
             yield self._courses[name]
 
-    def build_library(self)->None:
+    def build_library(self,no_save:bool=False)->None:
         courses = {d['name']:{k.title():v for (k,v) in d.items()} | {'Sport':'Bike Indoor'} \
             for d in [course.dict() for course in self]}
         
@@ -126,11 +126,12 @@ class CourseCollection:
                 if not course_row:
                     max_row+=1
                     course_row = max_row
-                    print(course_row)
+                    print(f"Adding {course}")
                 for key,value in course.items():
                     sheet.cell(row=course_row,column=col_key[key]).value = value
                     #print(f"Would set {(course_row,col_key[key])} to {value} for {course_name}")
-            self.workbook.save(filename=self.workbook_path)
+            if not no_save:
+                self.workbook.save(filename=self.workbook_path)
 
     @classmethod
     def open_excel(cls,fp:Path|str)->CourseCollection:
@@ -255,9 +256,12 @@ class Course:
         power_start:float
         ramp_to:float|None = None
         exclude:bool|None = None
-        total_time:float = 0.0
+        start_time:float = 0.0
 
-        
+        @property
+        def end_time(self)->float:
+            return self.start_time+self.time
+
 
         @property
         def power_end(self)->int:
@@ -281,8 +285,8 @@ class Course:
 
         @property
         def erg(self)->str:
-            return f"{self._erg_fmt(self.total_time)}\t{int(self.power_start)}\n"+\
-                f"{self._erg_fmt(self.total_time+self.time)}\t{int(self.power_end)}"
+            return f"{self._erg_fmt(self.start_time)}\t{int(self.power_start)}\n"+\
+                f"{self._erg_fmt(self.start_time+self.time)}\t{int(self.power_end)}"
         
         def __str__(self)->str:
             parts = [self._time_str(),"@",str(int(self.power_start)),'W']
@@ -343,7 +347,7 @@ class Course:
 
     def add_segment(self,seg:CourseSegment)->None:
         if self.segments:
-            seg.total_time = self.segments[-1].total_time + seg.time
+            seg.start_time = self.segments[-1].start_time + seg.time
         self.segments.append(seg)
 
     def dict(self)->dict:
@@ -414,7 +418,7 @@ class Course:
 
     @property
     def erg(self)->str:
-        parts = [f"[COURSE HEADER]","VERSION = {ERG_VERSION}",
+        parts = [f"[COURSE HEADER]",f"VERSION = {FIT_VERSION}",
                  "UNITS = ENGLISH",f"DESCRIPTION = {self.description}",
                  f"FILE NAME = {self.file_name}",
                  "FTP = 360",
@@ -426,7 +430,7 @@ class Course:
     def _recalc_segment_time(self):
 
         for i in range(1,len(self.segments)):
-            self.segments[i].total_time = self.segments[i-1].total_time + self.segments[i-1].time
+            self.segments[i].start_time = self.segments[i-1].start_time + self.segments[i-1].time
 
     def power_by_second(self)->list[int]:
         power_by_seconds = []
@@ -444,7 +448,7 @@ class Course:
     
     def total_time(self)->float:
         if self.segments:
-            return round(self.segments[-1].total_time,2)
+            return round(self.segments[-1].end_time,2)
         return 0.00
 
     @staticmethod
