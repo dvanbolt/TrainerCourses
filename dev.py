@@ -1,4 +1,5 @@
 import csv
+import os
 from trainercourses.course import CourseCollection
 from openpyxl import Workbook,load_workbook
 
@@ -15,7 +16,9 @@ def test2():
 
 def test3():
     cc = CourseCollection.open_excel(path)
-    cc.save(r'C:\Users\dvanb\source\repos\TrainerCourses\dev\output2')
+    #cc.build_library()
+   # print(cc.summary())
+    cc.save(os.getcwd() +'\\' + r'dev\output2')
 
 test3()
 

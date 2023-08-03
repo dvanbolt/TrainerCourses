@@ -1,6 +1,6 @@
 from __future__ import annotations
 from .openpyxl_extension import open as open_xlsx,Workbook
-from typing import Optional,Any,Generator,Callable,Iterator,Iterable
+from typing import Optional,Any,Generator,Callable,Iterator,Iterable,ClassVar
 from enum import Enum
 from copy import deepcopy,copy
 from math import sqrt
@@ -41,13 +41,13 @@ def pathsafe(fp:str|Path|Callable)->Callable|Path|str:
 
 
 class Templated:
-    _key_word_argument = None
+    key_word_argument = None
     class_init_kwargs = {'extra':Extra.forbid}
 
     @classmethod
     def remap(cls,**kwargs):
         d = {}
-        for key,value in cls._key.items():
+        for key,value in cls.classkey.items():
             d[value] = kwargs[key]
         return d
 
@@ -65,7 +65,7 @@ class Category(str,Enum):
 
 class CourseCollection:
     class UserProfile(BaseModel,Templated,**Templated.class_init_kwargs):
-        _key = {"Functional Threshold Power":"ftp"}
+        classkey:ClassVar[dict[str,str]] = {"Functional Threshold Power":"ftp"}
         ftp:float
 
     def __init__(self,name:str,user:UserProfile,workbook:Workbook,workbook_path:Path)->None:
@@ -129,7 +129,7 @@ class CourseCollection:
                     print(f"Adding {course}")
                 for key,value in course.items():
                     sheet.cell(row=course_row,column=col_key[key]).value = value
-                    #print(f"Would set {(course_row,col_key[key])} to {value} for {course_name}")
+                    #print(f"Would set {(course_row,colclasskey[key])} to {value} for {course_name}")
             if not no_save:
                 self.workbook.save(filename=self.workbook_path)
 
@@ -223,35 +223,35 @@ class Course:
 
 
     class Header(BaseModel,Templated,**Templated.class_init_kwargs):
-        _key = {"Name":"name","Category":"category","Repeat":"versions","Comments":"comments"}
-        _template_name = "Header"
-        _key_word_argument = "header"
-        _singleton = True
+        classkey:ClassVar[dict[str,str]] = {"Name":"name","Category":"category","Repeat":"versions","Comments":"comments"}
+        template_name:ClassVar[str] = "Header"
+        key_word_argument:ClassVar[str] = "header"
+        _singleton:ClassVar[bool] = True
         name:str
         category:Category
         comments:str|None = None
         versions:str|None = None
 
     class PrependedCourse(BaseModel,Templated,**Templated.class_init_kwargs):
-        _key = {"Name":"name","Blend Seconds":"blend"}
-        _key_word_argument = "prepend"
-        _template_name = "Insert Before"
-        _singleton = False
+        classkey:ClassVar[dict[str,str]] = {"Name":"name","Blend Seconds":"blend"}
+        key_word_argument:ClassVar[str] = "prepend"
+        template_name:ClassVar[str] = "Insert Before"
+        _singleton:ClassVar[bool] = False
         name:str
         blend:int|None = None
     class AppendedCourse(PrependedCourse,**Templated.class_init_kwargs):
-        _key_word_argument = "append"
-        _template_name = "Insert After"
+        key_word_argument = "append"
+        template_name = "Insert After"
 
     
     class CourseSegment(BaseModel,Templated,**Templated.class_init_kwargs):
-        _key = {"Time":"time",
+        classkey:ClassVar[dict[str,str]] = {"Time":"time",
                 "Power":"power_start",
                 "Ramp-to Power":"ramp_to",
                 "Exclude from last repeat":"exclude"}
-        _key_word_argument = "course_data"
-        _template_name = "Course"
-        _singleton = False
+        key_word_argument:ClassVar[str] = "course_data"
+        template_name:ClassVar[str] = "Course"
+        _singleton:ClassVar[bool] = False
         time:float
         power_start:float
         ramp_to:float|None = None
@@ -305,7 +305,7 @@ class Course:
       
             return ''.join(mntmp)
 
-    _sections = {section_type._template_name:section_type for section_type in \
+    _sections = {section_type.template_name:section_type for section_type in \
                 (Header,PrependedCourse,AppendedCourse,CourseSegment)}
 
     def __init__(self,
@@ -352,7 +352,7 @@ class Course:
 
     def dict(self)->dict:
         stats = asdict(self.stats)
-        p_ave = {f"{k}W avg":v for (k,v) in stats.pop('power_averages').items()}
+        p_ave = {f"{k}M avg":v for (k,v) in stats.pop('power_averages').items()}
         return {'name':self.version_name,
                 'category':self.category.value} | stats | p_ave |\
                     {'comments':self.comments}
@@ -527,21 +527,21 @@ class Course:
         for req_section in (cls.Header,cls.PrependedCourse,cls.AppendedCourse,):
             try:
                 for row in range(100):
-                    req_section_range = ranges.pop((req_section._template_name,row),None)
+                    req_section_range = ranges.pop((req_section.template_name,row),None)
                     if req_section_range:
                         break
                 else:
-                    raise KeyError(req_section._template_name)
+                    raise KeyError(req_section.template_name)
             except KeyError as ke:
-                missing.append(req_section._template_name)
+                missing.append(req_section.template_name)
             else:
-                keys = list(req_section._key.keys())
+                keys = list(req_section.classkey.keys())
                 section_data = req_section_range.list(element=dict,
                                                           element_keys=keys)
                 if req_section._singleton:
-                    collection_kwargs[req_section._key_word_argument] = req_section.parse(**section_data[0])
+                    collection_kwargs[req_section.key_word_argument] = req_section.parse(**section_data[0])
                 else:
-                    collection_kwargs[req_section._key_word_argument] = [req_section.parse(**line) for line in section_data]
+                    collection_kwargs[req_section.key_word_argument] = [req_section.parse(**line) for line in section_data]
         if missing:
             raise Exception(f"Couldn't find data for {', '.join(missing)} in top row on sheet '{sheet.title}'.")
 
@@ -565,7 +565,7 @@ class Course:
 
                 course_data[name] = [cls.CourseSegment.parse(**line) for line in \
                     course_range.list(element=dict,
-                                      element_keys=list(cls.CourseSegment._key.keys()))]
+                                      element_keys=list(cls.CourseSegment.classkey.keys()))]
 
         for course_name,course_segments in course_data.items():
             versions = cls._parse_versions(header.versions)
