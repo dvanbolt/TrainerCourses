@@ -1,7 +1,9 @@
+import os
+import sys
 import argparse
 from trainercourses.course import CourseCollection
 from pathlib import Path
-import os
+
 
 def prompt(o:str)->bool:
     i = input(f"{o}\n->")
@@ -11,34 +13,56 @@ def prompt(o:str)->bool:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-inc','--include_courses', type=str.lower,nargs='+',required=False)
-    parser.add_argument('-exc','--exclude_courses', type=str.lower,nargs='+',required=False)
-    parser.add_argument('-src','--source',default='',type=Path)
-    parser.add_argument('-dst','--destination',default='',type=Path)
+    parser.add_argument('--include', type=str.lower,nargs='+',required=False,help="Courses to include.  Example: *course name* *another course name*")
+    parser.add_argument('--exclude', type=str.lower,nargs='+',required=False,help="Courses to exclude.  Example: *course name* *another course name*")
+    parser.add_argument('--src',type=Path,help='Path (relative or absolute) to xlsx course collection.')
+    parser.add_argument('--dst',type=Path,help='Directory (relative or absolute) for exports.')
+
     parser.add_argument('-p','--print',action="store_true",
                         help="Print all courses to console.")
-
-    parser.add_argument('-bl','--build',action="store_true",
-                        help="Build library sheet in excel file.")
+    parser.add_argument('-b','--build',action="store_true",
+                        help="Update library sheet in xlsx file.")
     parser.add_argument('-e','--export',action="store_true",
-                        help="Export to folder structure in parent directory or in 'src' directory if supplied")
+                        help="Export to folder structure in $/export or in 'dst' directory if supplied")
     parser.add_argument('-f','--format',default='erg',
                         help="Export to what format?")
-
+   
     args = parser.parse_args()
+    
+    if not args.src:
+        source = Path(os.getcwd()) / 'Collection.xlsx'
+        
+    else:
+        source = Path(os.path.abspath(args.src))
 
-    cc = CourseCollection.open_excel(args.source)
+    if not source.exists():
+        raise ValueError(f"Source not found.  Either specify a custom path to a Course Collection .xlsx file or make sure "+\
+            f"the default file of $\Collection.xlsx exists.")
+        sys.exit()
+
+    cc = CourseCollection.open_excel(source)
 
     if args.print:
+        print('Printing Courses...')
         print(cc.summary(stats=True))
     if args.build:
+        print('Updating Library tab...')
         cc.build_library()
     if args.export:
-        if not args.destination:
-            dst = Path(os.getcwd())
+        inc,exc = "",""
+        if args.include:
+            inc = f" (include: {','.join(args.include)})"
+        if args.exclude:
+            exc = f" (exclude: {','.join(args.exclude)})"
+        print(f'Exporting Courses...{inc}{exc}')
+        if not args.dst:
+            dst = Path(os.getcwd()) / f"export"
         else:
-            dst = Path(os.path.abspath(args.destination))
+            dst = Path(os.path.abspath(args.dst))
         if not dst.exists():
             if prompt(f"{dst} does not exist. Create it?"):
                 dst.mkdir(parents=True)
-        cc.save(dst=dst,include=args.include_courses,exclude=args.exclude_courses)
+            else:
+                sys.exit()
+        cc.save(dst=dst,include=args.include,exclude=args.exclude)
+sys.exit()

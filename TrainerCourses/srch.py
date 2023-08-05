@@ -16,7 +16,7 @@ def qkfltr(s:Iterable[str],
             raise TypeError(f"Every element of 's' must be of type <str> not {','.join(btypes)}")
         raise TypeError(f"'search' must be an iterable, not {type(i)}")
 
-    if case_sens:
+    if not case_sens:
         _case = lambda x:x.lower()
         for iterable_arg in (include,exclude):
             if iterable_arg:
@@ -43,6 +43,7 @@ def qkfltr(s:Iterable[str],
                 include_lmds.append((lambda a,b:_case(a).startswith(b[:-1]),inc_element))
             else:
                 include_lmds.append((lambda a,b:_case(a)==b,inc_element))
+        
         res_len = 0
         for element in s:
             for inc_lmb,t in include_lmds:
@@ -75,5 +76,5 @@ def qkfltr(s:Iterable[str],
                     excluded.add(element)
                     break
         included = [e for e in included if e not in excluded]  
-    
+ 
     return included
