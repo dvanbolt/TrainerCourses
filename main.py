@@ -41,19 +41,18 @@ if __name__ == "__main__":
         sys.exit()
 
     cc = CourseCollection.open_excel(source)
-
+    inc,exc = "",""
+    if args.include:
+        inc = f" (include: {','.join(args.include)})"
+    if args.exclude:
+        exc = f" (exclude: {','.join(args.exclude)})"
     if args.print:
-        print('Printing Courses...')
-        print(cc.summary(stats=True))
+        print(f'Printing Courses...{inc}{exc}')
+        print(cc.summary(stats=True,include=args.include,exclude=args.exclude))
     if args.build:
         print('Updating Library tab...')
         cc.build_library()
     if args.export:
-        inc,exc = "",""
-        if args.include:
-            inc = f" (include: {','.join(args.include)})"
-        if args.exclude:
-            exc = f" (exclude: {','.join(args.exclude)})"
         print(f'Exporting Courses...{inc}{exc}')
         if not args.dst:
             dst = Path(os.getcwd()) / f"export"

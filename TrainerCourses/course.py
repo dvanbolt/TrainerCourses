@@ -421,7 +421,7 @@ class Course:
         parts = [f"[COURSE HEADER]",f"VERSION = {FIT_VERSION}",
                  "UNITS = ENGLISH",f"DESCRIPTION = {self.description}",
                  f"FILE NAME = {self.file_name}",
-                 "FTP = 360",
+                 f"FTP = {int(self.collection.ftp)}",
                  "MINUTES WATTS",
                  "[END COURSE HEADER]","[COURSE DATA]",'\n'.join([seg.erg for seg in self]),
                  "[END COURSE DATA]"]
